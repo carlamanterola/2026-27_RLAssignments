@@ -1,10 +1,3 @@
-"""Tabular Q-learning (off-policy TD control) on the 3x4 GridworldEnv.
-
-Update rule:
-    Q(s,a) <- Q(s,a) + alpha * [ r + gamma * max_a' Q(s',a') - Q(s,a) ]
-
-"""
-
 import os
 import sys
 
@@ -12,17 +5,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 import tools
 from env import GridworldEnv
 
 
-# -------------
-# Helpers
-# -------------
 def greedy_action(Q, s, rng):
-    """argmax_a Q[s, a] with RANDOM tie-breaking (plain argmax would always
-    pick LEFT while Q is all zeros, which biases exploration)."""
     best = np.flatnonzero(np.isclose(Q[s], Q[s].max()))
     return int(rng.choice(best))
 
@@ -33,9 +20,9 @@ def epsilon_greedy(Q, s, epsilon, rng):
     return greedy_action(Q, s, rng)           #explotar
 
 
-# ---------------------------------------------------------------------
+# -----------
 # Q-learning
-# ---------------------------------------------------------------------
+# -----------
 def q_learning(
     env,
     n_episodes=20000,
@@ -43,12 +30,12 @@ def q_learning(
     gamma=0.99,
     eps_start=1.0,
     eps_end=0.05,
-    eps_decay=0.9997,  # multiplicative decay per episode (slow: off-path states need visits)
-    max_steps=200,  # env never truncates, so we cap episode length
+    eps_decay=0.9997,  
+    max_steps=200, 
     seed=0,
 ):
     rng = np.random.default_rng(seed)
-    env.reset(seed=seed)  # seeds env's np.random ONCE (reset(seed) reseeds globally)
+    env.reset(seed=seed)
 
     Q = np.zeros((env.n_states, env.n_actions))
     returns, lengths = [], []
@@ -61,10 +48,6 @@ def q_learning(
         for _ in range(max_steps):
             a = epsilon_greedy(Q, s, epsilon, rng)  # behaviour policy: eps-greedy
             s2, r, terminated, truncated, _ = env.step(a)
-
-            # Target uses the GREEDY action at s' (off-policy).
-            # Terminal states have value 0 -> no bootstrapping when terminated.
-            # (If we were truncated by max_steps we DO still bootstrap.)
             target = r + gamma * np.max(Q[s2]) * (not terminated)
             Q[s, a] += alpha * (target - Q[s, a])
 
@@ -81,9 +64,9 @@ def q_learning(
     return Q, np.array(returns), np.array(lengths)
 
 
-# ---------------------------------------------------------------------
-# Ground truth (value iteration on env.P) -> to verify our Q-learning
-# ---------------------------------------------------------------------
+# ----------------------------------------------------
+# Value iteration on env.P -> To verify our Q-learning
+# ----------------------------------------------------
 def value_iteration(env, gamma=0.99, tol=1e-10):
     Q = np.zeros((env.n_states, env.n_actions))
     while True:
@@ -116,9 +99,9 @@ def moving_average(x, w=100):
     return np.convolve(x, np.ones(w) / w, mode="valid")
 
 
-# ---------------------------------------------------------------------
+# ---------------------------------
 # Main: deterministic + stochastic
-# ---------------------------------------------------------------------
+# ---------------------------------
 def run(is_slippery, gamma=0.99):
     name = "stochastic" if is_slippery else "deterministic" #If is_slippery is True, name is "stochastic", otherwise it's "deterministic"
     env = GridworldEnv(is_slippery=is_slippery)
@@ -126,12 +109,10 @@ def run(is_slippery, gamma=0.99):
     Q, returns, lengths = q_learning(env, gamma=gamma)
     Q_star = value_iteration(env, gamma=gamma)
 
-    # Only compare policies on non-terminal, non-wall states
     valid = [s for s in range(env.n_states)
              if s != env.wall_state and s not in env.terminal_states]
     policy = Q.argmax(axis=1)
     policy_star = Q_star.argmax(axis=1)
-    # (ties in Q_star are possible, so also accept any optimal action)
     match = np.mean([np.isclose(Q_star[s, policy[s]], Q_star[s].max()) for s in valid])
 
     print(f"\n=== {name.upper()} ===")
