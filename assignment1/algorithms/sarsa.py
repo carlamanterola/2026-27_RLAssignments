@@ -91,27 +91,6 @@ def value_iteration(env, gamma=0.99, tol=1e-10):
         Q = Q_new
 
 
-def report(env, Q, title, gamma):
-    """Console summary. Adds max|V-V*| (less dominated by off-path actions than
-    max|Q-Q*|) and the discounted greedy return next to the optimal V*(start)."""
-    Q_star = value_iteration(env, gamma=gamma)
-    valid = [s for s in range(env.n_states)
-             if s != env.wall_state and s not in env.terminal_states]
-    policy = Q.argmax(axis=1)
-    match = np.mean([np.isclose(Q_star[s, policy[s]], Q_star[s].max()) for s in valid])
-    v_err = np.abs(Q.max(axis=1)[valid] - Q_star.max(axis=1)[valid]).max()
-    regret = max(Q_star[s].max() - Q_star[s, policy[s]] for s in valid)
-    ret, goal_rate, pit_rate = evaluate(env, Q, n_episodes=1000, gamma=gamma)
-
-    print(f"\n=== {title.upper()} ===")
-    print(f"max |Q - Q*|            : {np.abs(Q[valid] - Q_star[valid]).max():.4f}")
-    print(f"max |V - V*|            : {v_err:.4f}")
-    print(f"states with optimal act.: {match * 100:.0f}%  (max action gap {regret:.4f})")
-    print(f"V(start) learned / true : {Q[env.start_state].max():.3f} / {Q_star[env.start_state].max():.3f}")
-    print(f"greedy discounted return: {ret:.3f}  (optimal V*(start) = {Q_star[env.start_state].max():.3f})")
-    print(f"goal / pit rate         : {goal_rate:.3f} / {pit_rate:.3f}")
-
-
 def moving_average(x, w=100):
     return np.convolve(x, np.ones(w) / w, mode="valid")
 
@@ -119,6 +98,45 @@ def moving_average(x, w=100):
 N_EPISODES = 5000
 N_TRIALS = 40
 N_SEEDS = 2
+EVAL_SEEDS = range(10, 15)  # seeds (unseen during tuning) for the final before/after report
+
+DEFAULT_PARAMS = {
+    "alpha": 0.1,
+    "gamma": 0.99,
+    "eps_min": 0.05,
+    "eps_decay": 0.999,
+}
+
+
+def evaluate_params(env, params, seeds=EVAL_SEEDS):
+    """Trains one SARSA agent per seed and averages the metrics (same ones as the Q-learning report).
+    'greedy avg return' is the DISCOUNTED greedy return (GAMMA_EVAL), i.e. the tuning objective."""
+    Q_star = value_iteration(env, gamma=params["gamma"])
+    valid = [s for s in range(env.n_states)
+             if s != env.wall_state and s not in env.terminal_states]
+
+    errs, matches, v_start, greedy = [], [], [], []
+    for seed in seeds:
+        Q, _ = sarsa(env, n_episodes=N_EPISODES, seed=seed, **params)
+        policy = Q.argmax(axis=1)
+        errs.append(np.abs(Q[valid] - Q_star[valid]).max())
+        matches.append(np.mean([np.isclose(Q_star[s, policy[s]], Q_star[s].max()) for s in valid]))
+        v_start.append(Q[env.start_state].max())
+        greedy.append(evaluate(env, Q, n_episodes=1000, gamma=GAMMA_EVAL)[0])
+
+    return {
+        "max |Q - Q*|": np.mean(errs),
+        "states with optimal act. (%)": 100 * np.mean(matches),
+        "V(start) learned": np.mean(v_start),
+        "V(start) true": Q_star[env.start_state].max(),
+        "greedy avg return": np.mean(greedy),
+    }
+
+
+def print_report(params, metrics):
+    print("  params: " + ", ".join(f"{k}={v:.5g}" for k, v in params.items()))
+    for k, v in metrics.items():
+        print(f"  {k:<30}: {v:.4f}")
 
 
 def tune(slippery):
@@ -142,11 +160,30 @@ if __name__ == "__main__":
         env = GridworldEnv(is_slippery=slippery)
         tools.plot_environment(env, title=f"Environment ({mode})")
 
+        print(f"\n{'=' * 60}\n=== {mode.upper()} ===\n{'=' * 60}")
+
+        # ---------- BEFORE tuning ----------
+        print("\n--- BEFORE tuning (default hyperparameters) ---")
+        before = evaluate_params(env, DEFAULT_PARAMS)
+        print_report(DEFAULT_PARAMS, before)
+
+        # ---------- Optuna tuning ----------
         best = tune(slippery)
+
+        # ---------- AFTER tuning ----------
+        print("\n--- AFTER tuning (Optuna best hyperparameters) ---")
+        after = evaluate_params(env, best)
+        print_report(best, after)
+
+        # ---------- Comparison ----------
+        print("\n--- BEFORE vs AFTER ---")
+        print(f"  {'metric':<30}{'before':>12}{'after':>12}")
+        for k in before:
+            print(f"  {k:<30}{before[k]:>12.4f}{after[k]:>12.4f}")
+
+        # ---------- Plots with the tuned agent ----------
         Q, rets = sarsa(env, n_episodes=N_EPISODES, **best)
         name = "SARSA (tuned)"
-
-        report(env, Q, f"{mode} - {name}", best["gamma"])
         tools.plot_policy(Q.argmax(axis=1), env, title=f"{name} policy ({mode})")
         tools.plot_value_function(Q.max(axis=1), env, title=f"{name} V(s) = max_a Q ({mode})")
 
