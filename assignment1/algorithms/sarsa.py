@@ -6,9 +6,11 @@ import matplotlib.pyplot as plt
 
 # env.py and tools.py live in assignment1/ (parent of algorithms/); env.py itself does `import tools`
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tuning.py lives next to this file
 
 import tools
 from env import GridworldEnv
+from tuning import tune as optuna_tune, td_space
 
 
 def eps_greedy(Q, s, eps):
@@ -103,28 +105,78 @@ def evaluate(env, Q, n_episodes=1000, max_steps=100):
     return np.mean(rets), goals / n_episodes, pits / n_episodes
 
 
+def value_iteration(env, gamma=0.99, tol=1e-10):
+    """Ground truth Q* from env.P (used to verify the learned Q)."""
+    Q = np.zeros((env.n_states, env.n_actions))
+    while True:
+        V = Q.max(axis=1)
+        Q_new = np.zeros_like(Q)
+        for s in range(env.n_states):
+            for a in range(env.n_actions):
+                for p, s2, r, done in env.P[s][a]:
+                    Q_new[s, a] += p * (r + gamma * V[s2] * (not done))
+        if np.abs(Q_new - Q).max() < tol:
+            return Q_new
+        Q = Q_new
+
+
+def report(env, Q, title, gamma):
+    """Console summary (same format as q-learning.py)."""
+    Q_star = value_iteration(env, gamma=gamma)
+    valid = [s for s in range(env.n_states)
+             if s != env.wall_state and s not in env.terminal_states]
+    policy = Q.argmax(axis=1)
+    match = np.mean([np.isclose(Q_star[s, policy[s]], Q_star[s].max()) for s in valid])
+
+    print(f"\n=== {title.upper()} ===")
+    print(f"max |Q - Q*|            : {np.abs(Q[valid] - Q_star[valid]).max():.4f}")
+    print(f"states with optimal act.: {match * 100:.0f}%")
+    print(f"V(start) learned / true : {Q[env.start_state].max():.3f} / {Q_star[env.start_state].max():.3f}")
+    print(f"greedy avg return       : {evaluate(env, Q, n_episodes=1000, max_steps=200)[0]:.3f}")
+
+
 def moving_average(x, w=100):
     return np.convolve(x, np.ones(w) / w, mode="valid")
 
 
+N_EPISODES = 5000
+N_TRIALS = 40
+N_SEEDS = 2
+
+
+def tune(algo, slippery):
+    """Optuna search via the shared tuning module. algo in {"sarsa", "n_step"}."""
+    env = GridworldEnv(is_slippery=slippery)
+    fn = sarsa if algo == "sarsa" else n_step_sarsa
+    return optuna_tune(
+        train_fn=lambda seed, **p: fn(env, n_episodes=N_EPISODES, seed=seed, **p)[0],
+        eval_fn=lambda Q: evaluate(env, Q, n_episodes=500)[0],
+        space=lambda trial: td_space(trial, n_step=(algo == "n_step"), eps_floor="eps_min"),
+        n_trials=N_TRIALS,
+        n_seeds=N_SEEDS,
+        label=f"{'stochastic' if slippery else 'deterministic'} {algo}",
+    )
+
+
 if __name__ == "__main__":
-    N_STEP = 3
     for slippery in (False, True):
         mode = "stochastic" if slippery else "deterministic"
         env = GridworldEnv(is_slippery=slippery)
         tools.plot_environment(env, title=f"Environment ({mode})")
 
-        results = {}
-        results["SARSA"] = sarsa(env)
-        results[f"{N_STEP}-step SARSA"] = n_step_sarsa(env, n=N_STEP)
+        best_s = tune("sarsa", slippery)
+        best_n = tune("n_step", slippery)
+        results = {
+            "SARSA (tuned)": (*sarsa(env, n_episodes=N_EPISODES, **best_s), best_s["gamma"]),
+            f"{best_n['n']}-step SARSA (tuned)": (*n_step_sarsa(env, n_episodes=N_EPISODES, **best_n), best_n["gamma"]),
+        }
 
         plt.figure(figsize=(7, 4))
-        for name, (Q, rets) in results.items():
+        for name, (Q, rets, gamma) in results.items():
+            report(env, Q, f"{mode} - {name}", gamma)
             plt.plot(moving_average(rets), label=name)
             tools.plot_policy(Q.argmax(axis=1), env, title=f"{name} policy ({mode})")
             tools.plot_value_function(Q.max(axis=1), env, title=f"{name} V(s) = max_a Q ({mode})")
-            m, g, p = evaluate(env, Q)
-            print(f"[{mode}] {name}: mean return={m:.3f}, goal rate={g:.3f}, pit rate={p:.3f}")
         plt.xlabel("Episode")
         plt.ylabel("Return (moving avg, w=100)")
         plt.title(f"Learning curves ({mode})")
