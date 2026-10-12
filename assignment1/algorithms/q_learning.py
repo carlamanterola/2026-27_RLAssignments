@@ -22,7 +22,7 @@ DEFAULT_PARAMS = {
     "alpha": 0.1,
     "gamma": 0.99,
     "eps_end": 0.05,
-    "eps_decay": 0.9997,
+    "eps_decay": 0.999,
 }
 
 
@@ -47,7 +47,7 @@ def q_learning(
     gamma=0.99,
     eps_start=1.0,
     eps_end=0.05,
-    eps_decay=0.9997,
+    eps_decay=0.999,
     max_steps=200,
     seed=0,
 ):
