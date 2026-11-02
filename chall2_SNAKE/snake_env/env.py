@@ -5,7 +5,7 @@ import numpy as np
 import cv2
 
 # Set the goal length for the snake (used to normalize the length feature)
-SNAKE_LEN_GOAL = 30
+SNAKE_LEN_GOAL = 60
 
 # Steps allowed without eating an apple before the episode is truncated
 STARVATION_LIMIT = 200

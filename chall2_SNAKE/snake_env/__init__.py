@@ -25,3 +25,10 @@ register(
     max_episode_steps=500,
     reward_threshold=30,
 )
+
+register(
+    id="Snake-v3",
+    entry_point="snake_env.env:SnakeEnv",
+    max_episode_steps=1000,
+    kwargs={"action_size": 2},
+)

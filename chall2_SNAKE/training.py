@@ -7,11 +7,11 @@ from stable_baselines3.common.env_util import make_vec_env
 import snake_env  # noqa: F401 - Registers Snake environments via gymnasium.register
 
 ALGORITHM = "PPO"
-ENV_ID = "Snake-v2"
+ENV_ID = "Snake-v3"
 N_ENVS = 8
-TIMESTEPS = 1_000_000
+TIMESTEPS = 2_000_000
 
-models_dir = f"models/{ALGORITHM}"
+models_dir = f"models/{ALGORITHM}_{ENV_ID}"   # keeps checkpoints of different variants apart
 log_dir = "logs"
 os.makedirs(models_dir, exist_ok=True)
 os.makedirs(log_dir, exist_ok=True)
@@ -47,7 +47,7 @@ model = PPO(
     n_steps=256,
     batch_size=256,
     n_epochs=10,
-    gamma=0.99,
+    gamma=0.995,
     gae_lambda=0.95,
     clip_range=0.2,
     ent_coef=0.01,
